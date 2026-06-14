@@ -409,6 +409,17 @@ def api_stream(session_id):
     return Response(generate(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
+# ─── DIAGRAMS ROUTES ───────────────────────────────────────────────────────
+import os
+
+@app.route("/diagrams/shopease_architecture.xml")
+def get_architecture_xml():
+    with open("shopease_architecture.xml", "r") as f:
+        return f.read(), 200, {
+            "Content-Type": "application/xml",
+            "Access-Control-Allow-Origin": "*"
+        }
+
 # ─── HTML TEMPLATE ─────────────────────────────────────────────────────────────
 HTML_APP = r"""<!DOCTYPE html>
 <html lang="en">
@@ -686,6 +697,7 @@ input[type=number]:focus{border-color:var(--primary)}
   <div class="nav-item" onclick="nav('sharding')"><span class="nav-icon">🔀</span>DB Sharding</div>
   <div class="nav-item" onclick="nav('architecture')"><span class="nav-icon">🗺️</span>Architecture</div>
   <div class="nav-item" onclick="nav('logs')"><span class="nav-icon">🖥️</span>System Logs</div>
+  <div class="nav-item" onclick="nav('diagrams')"><span class="nav-icon">📊</span>Diagrams</div>
   <div class="nav-div"></div>
   <div class="nav-group">Info</div>
   <div class="nav-item" onclick="nav('about')"><span class="nav-icon">📘</span>About</div>
@@ -859,6 +871,17 @@ input[type=number]:focus{border-color:var(--primary)}
   </div>
 </div>
 
+<!-- DIAGRAMS -->
+<div class="page" id="page-diagrams">
+  <div class="ph"><div><div class="pt">Architecture Diagrams</div><div class="ps">View diagrams using draw.io viewer</div></div></div>
+  <div class="card">
+    <div class="section-lbl">Diagram Viewer</div>
+    <div id="diagram-container" style="height:70vh;border-radius:8px;overflow:hidden;border:1px solid var(--border);background:white;display:flex;align-items:center;justify-content:center">
+      <p style="color:var(--ink-soft)">Loading diagram…</p>
+    </div>
+  </div>
+</div>
+
 </div><!-- #main -->
 </div><!-- #app -->
 <div id="toasts"></div>
@@ -900,9 +923,99 @@ function nav(page) {
     catalog: loadCatalog, cart: loadCart, orders: loadOrders,
     kafka: loadKafka, sharding: loadSharding,
     architecture: renderArch, logs: loadLogs,
-    about: renderAbout, pipeline: loadPipelineKafka
+    about: renderAbout, pipeline: loadPipelineKafka,
+    diagrams: () => loadDiagram('shopease_architecture')
   };
   if(loaders[page]) loaders[page]();
+}
+
+// ─── DIAGRAM LOADER ─────────────────────────────────────────────────────────
+let _drawioMsgHandler = null;
+
+function loadDiagram(name) {
+  const label = 'System Architecture';
+  const container = document.getElementById('diagram-container');
+  if (_drawioMsgHandler) {
+    window.removeEventListener('message', _drawioMsgHandler);
+    _drawioMsgHandler = null;
+  }
+  container.style.display = 'flex';
+  container.style.flexDirection = 'column';
+  container.style.alignItems = 'stretch';
+  container.style.justifyContent = 'stretch';
+  container.innerHTML = `<div style="display:flex;flex-direction:column;width:100%;height:100%;min-height:0;">
+    <div style="padding:10px;background:#f5f5f5;border-bottom:1px solid #ddd;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;">
+      <span style="font-weight:500;">${label}</span>
+      <button class="btn btn-o btn-sm" onclick="openDiagramInNewTab('${name}')">🔗 Open in draw.io</button>
+    </div>
+    <div id="diagram-content" style="flex:1;width:100%;min-height:0;display:flex;align-items:center;justify-content:center;">
+      <p>Loading diagram…</p>
+    </div>
+  </div>`;
+
+  fetch(`/diagrams/${name}.xml`)
+    .then(res => {
+      if (!res.ok) throw new Error(`Could not load diagram (${res.status})`);
+      return res.text();
+    })
+    .then(xml => embedDrawioDiagram(name, label, xml))
+    .catch(err => {
+      const el = document.getElementById('diagram-content');
+      if (el) el.innerHTML = `<p style="color:red;padding:20px;">Error loading diagram: ${err.message}</p>`;
+    });
+}
+
+function embedDrawioDiagram(name, label, xml) {
+  const container = document.getElementById('diagram-container');
+  container.innerHTML = `<div style="display:flex;flex-direction:column;width:100%;height:100%;min-height:0;">
+    <div style="padding:10px;background:#f5f5f5;border-bottom:1px solid #ddd;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;">
+      <span style="font-weight:500;">${label}</span>
+      <button class="btn btn-o btn-sm" onclick="openDiagramInNewTab('${name}')">🔗 Open in draw.io</button>
+    </div>
+    <iframe id="diagram-iframe" style="flex:1;width:100%;border:none;min-height:0;" title="${label}"></iframe>
+  </div>`;
+
+  const iframe = document.getElementById('diagram-iframe');
+  let loaded = false;
+  const sendXml = () => {
+    if (loaded || !iframe.contentWindow) return;
+    loaded = true;
+    iframe.contentWindow.postMessage(JSON.stringify({
+      action: 'load',
+      xml: xml,
+      autosave: 0
+    }), '*');
+  };
+
+  _drawioMsgHandler = (evt) => {
+    if (evt.source !== iframe.contentWindow) return;
+    try {
+      const msg = JSON.parse(evt.data);
+      if (msg.event === 'init') sendXml();
+    } catch (_) {}
+  };
+  window.addEventListener('message', _drawioMsgHandler);
+  iframe.src = 'https://embed.diagrams.net/?embed=1&ui=min&spin=1&proto=json&noSaveBtn=1&noExitBtn=1';
+}
+
+function openDiagramInNewTab(name) {
+  fetch(`/diagrams/${name}.xml`)
+    .then(res => res.text())
+    .then(xml => {
+      const w = window.open('https://app.diagrams.net/?splash=0', '_blank');
+      if (!w) return;
+      const handler = (evt) => {
+        if (evt.source !== w) return;
+        try {
+          const msg = JSON.parse(evt.data);
+          if (msg.event === 'init') {
+            w.postMessage(JSON.stringify({action: 'load', xml, autosave: 0}), '*');
+            window.removeEventListener('message', handler);
+          }
+        } catch (_) {}
+      };
+      window.addEventListener('message', handler);
+    });
 }
 
 // ─── USER ────────────────────────────────────────────────────────────────────
@@ -1428,8 +1541,6 @@ async function resetAll() {
 # ─── ENTRYPOINT ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     import os
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
     # Seed some startup logs
     add_log("── ShopEase Platform Initialised ──", "system")
     add_log("Auth Service: Ready (bcrypt + JWT)", "auth")
@@ -1452,7 +1563,9 @@ if __name__ == "__main__":
     print("    📨  Kafka      — Real-time event stream")
     print("    🔀  Sharding   — DB hash distribution")
     print("    🗺️  Architecture — Full system design")
+    print("    📊  Diagrams   — Architecture diagrams")
     print("    🖥️  Logs       — Microservice activity")
     print("\n  Press Ctrl+C to stop\n" + "="*60 + "\n")
-
-    app.run(debug=False, port=5000, threaded=True)
+    
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
