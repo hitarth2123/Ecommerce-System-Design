@@ -1428,6 +1428,9 @@ async function resetAll() {
 
 # ─── ENTRYPOINT ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
+    import os
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
     # Seed some startup logs
     add_log("── ShopEase Platform Initialised ──", "system")
     add_log("Auth Service: Ready (bcrypt + JWT)", "auth")
