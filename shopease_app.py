@@ -660,7 +660,6 @@ input[type=number]:focus{border-color:var(--primary)}
 <!-- TOPBAR -->
 <div id="topbar">
   <div class="logo">ShopEase <span class="logo-badge">LIVE</span></div>
-  <div class="tagline">B.Tech CSE 2024-28 · System Design · Semester IV · ITM Skills University</div>
   <div class="top-stats" id="top-stats"></div>
   <div class="user-selector">
     <div class="user-avatar" id="top-av" style="background:#E63946">A</div>
